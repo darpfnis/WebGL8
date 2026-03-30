@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ЛР №8 -- WebGL · Проекцiйнi тiнi</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-badge">
+      <span class="dot"></span>
+      Комп'ютерна графiка
+    </div>
+    <h1>Лабораторна робота №8</h1>
+    <p>Проекцiйнi тiнi та конвеєр вiзуалiзацiї · shadow projection matrix · depth test</p>
+  </header>
+
+  <main class="app-wrap">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-number">✦</div>
+        <h2>
+          Сцена: земля + 2 об'єкти · рухоме джерело свiтла ·
+          напiвпрозорi тiнi · буфер глибини
+        </h2>
+      </div>
+
+      <div class="card-body">
+
+        <div class="controls">
+
+          <div class="control-group">
+            <span class="control-label">Прозорiсть тiнi</span>
+            <input
+              type="range"
+              id="ctrl-alpha"
+              min="0.1"
+              max="0.9"
+              step="0.01"
+              value="0.45"
+            />
+            <span class="slider-val" id="val-alpha">0.45</span>
+          </div>
+
+          <div class="control-group">
+            <span class="control-label">Зсув свiтла</span>
+            <input
+              type="range"
+              id="ctrl-light"
+              min="0"
+              max="6.28"
+              step="0.05"
+              value="0"
+            />
+          </div>
+
+        </div>
+
+        <div style="position: relative;">
+          <canvas id="main-canvas" width="912" height="500"></canvas>
+          <canvas
+            id="light-overlay"
+            width="912"
+            height="500"
+            style="
+              position: absolute;
+              top: 0; left: 0;
+              width: 100%; height: 100%;
+              pointer-events: none;
+              border-radius: 10px;
+            "
+          ></canvas>
+        </div>
+
+      </div>
+
+      <div class="status-bar">
+        <span>
+          <span class="status-dot"></span>
+          shadow = PV * shadowProj(light) * M · depthMask(false) пiд час тiней
+        </span>
+        <span id="status-info">--</span>
+      </div>
+    </div>
+  </main>
+
+  <footer>webgl · projection shadows · depth buffer · КПI iм. Iгоря Сiкорського</footer>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
