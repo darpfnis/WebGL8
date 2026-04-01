@@ -1,34 +1,26 @@
+// main.js -- ЛР №8: проекцiйнi тiнi
+//
+// Алгоритм двох проходiв:
+//   1. Малюємо всi об'єкти звичайним шейдером
+//   2. Малюємо тiнi - та сама геометрiя, MVP = PV * shadowProj * M
+//      depthMask(false) - не пишемо в depth buffer пiд час тiней
+//      blending - напiвпрозорий темний колiр (завдання 4)
+
 import { setupWebGL, createProgram, mat4 } from './webgl-utils.js';
-import { ground, box1, box2 }              from './geometry.js';
+import { GROUND, BOX1, BOX2 }              from './geometry.js';
 
-const VS = `
-  attribute vec3 a_Position;
-  uniform mat4 u_MVP;
-  void main() {
-    gl_Position = u_MVP * vec4(a_Position, 1.0);
-  }
-`;
-
-const FS = `
-  precision mediump float;
-  uniform vec4 u_Color;
-  void main() {
-    gl_FragColor = u_Color;
-  }
-`;
-
-const VS_COL = `
+// шейдер об'єктiв - колiр з атрибутного буфера
+const VS_SCENE = `
   attribute vec3 a_Position;
   attribute vec3 a_Color;
-  uniform mat4 u_MVP;
-  varying vec3 v_Color;
+  uniform   mat4 u_MVP;
+  varying   vec3 v_Color;
   void main() {
     gl_Position = u_MVP * vec4(a_Position, 1.0);
     v_Color = a_Color;
   }
 `;
-
-const FS_COL = `
+const FS_SCENE = `
   precision mediump float;
   varying vec3 v_Color;
   void main() {
@@ -36,240 +28,191 @@ const FS_COL = `
   }
 `;
 
-function uploadGeometry(gl, geo) {
+// шейдер тiней - фiксований напiвпрозорий темний колiр
+const VS_SHADOW = `
+  attribute vec3 a_Position;
+  uniform   mat4 u_MVP;
+  void main() {
+    gl_Position = u_MVP * vec4(a_Position, 1.0);
+  }
+`;
+const FS_SHADOW = `
+  precision mediump float;
+  uniform float u_Alpha;
+  void main() {
+    gl_FragColor = vec4(0.05, 0.05, 0.05, u_Alpha);
+  }
+`;
+
+function upload(gl, mesh) {
   const posBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, geo.pos, gl.STATIC_DRAW);
-  console.log('[upload] pos floats:', geo.pos.length, 'first 6:', Array.from(geo.pos.slice(0,6)));
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
 
   const colBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, geo.col, gl.STATIC_DRAW);
-  console.log('[upload] col floats:', geo.col.length);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.colors, gl.STATIC_DRAW);
 
   const idxBuf = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geo.idx, gl.STATIC_DRAW);
-  console.log('[upload] idx count:', geo.count, 'indices:', Array.from(geo.idx));
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
 
-  return { posBuf, colBuf, idxBuf, count: geo.count };
+  return { posBuf, colBuf, idxBuf, count: mesh.count };
 }
 
-function drawObject(gl, prog, buf, mvp) {
-  const aPos = gl.getAttribLocation(prog, 'a_Position');
-  const aCol = gl.getAttribLocation(prog, 'a_Color');
-  const uMVP = gl.getUniformLocation(prog, 'u_MVP');
+function drawScene(gl, locs, buf, mvp) {
+  gl.uniformMatrix4fv(locs.uMVP, false, mvp);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, buf.posBuf);
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(locs.aPos);
+  gl.vertexAttribPointer(locs.aPos, 3, gl.FLOAT, false, 0, 0);
 
-  if (aCol >= 0) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf.colBuf);
-    gl.enableVertexAttribArray(aCol);
-    gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, 0, 0);
-  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf.colBuf);
+  gl.enableVertexAttribArray(locs.aCol);
+  gl.vertexAttribPointer(locs.aCol, 3, gl.FLOAT, false, 0, 0);
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf.idxBuf);
-  gl.uniformMatrix4fv(uMVP, false, mvp);
   gl.drawElements(gl.TRIANGLES, buf.count, gl.UNSIGNED_SHORT, 0);
-
-  const err = gl.getError();
-  if (err !== gl.NO_ERROR) console.error('[drawObject] gl.getError():', err);
 }
 
-function drawShadow(gl, prog, buf, mvp, alpha) {
-  const aPos = gl.getAttribLocation(prog, 'a_Position');
-  const uMVP = gl.getUniformLocation(prog, 'u_MVP');
-  const uCol = gl.getUniformLocation(prog, 'u_Color');
-
-  // вимикаємо a_Color якщо він був увімкнений попередньою програмою
-  const aCol = gl.getAttribLocation(prog, 'a_Color');
-  if (aCol >= 0) gl.disableVertexAttribArray(aCol);
+function drawShadow(gl, locs, buf, mvp, alpha) {
+  gl.uniformMatrix4fv(locs.uMVP, false, mvp);
+  gl.uniform1f(locs.uAlpha, alpha);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, buf.posBuf);
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(locs.aPos);
+  gl.vertexAttribPointer(locs.aPos, 3, gl.FLOAT, false, 0, 0);
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf.idxBuf);
-  gl.uniformMatrix4fv(uMVP, false, mvp);
-  gl.uniform4f(uCol, 0.1, 0.1, 0.1, alpha);
   gl.drawElements(gl.TRIANGLES, buf.count, gl.UNSIGNED_SHORT, 0);
-
-  const err = gl.getError();
-  if (err !== gl.NO_ERROR) console.error('[drawShadow] gl.getError():', err);
-}
-
-// shadowProjection скоригована: WebGL mat4 — column-major,
-// але multiply очікує рядки як стовпці (транспоновано).
-// Перевіряємо і будуємо матрицю вручну в тому ж форматі що mat4.trans/scale
-function shadowProjectionFixed(lx, ly, lz, groundY) {
-  const d = ly - groundY;
-  // column-major, той самий layout що і решта mat4 функцій у webgl-utils.js
-  // Перевіряємо за lookAt/perspective — вони пишуть [col0row0, col0row1, ...]
-  // shadow matrix (row-major form):
-  // | d   0   0   0  |
-  // |-lx  0  -lz  -1 |
-  // | 0   0   d   0  |
-  // |lx*g 0  lz*g ly |
-  // В column-major (те що передається у Float32Array для gl):
-  return new Float32Array([
-    d,           -lx,          0,           lx * groundY,
-    0,            0,           0,           0,
-    0,           -lz,          d,           lz * groundY,
-    0,           -1,           0,           ly,
-  ]);
 }
 
 window.onload = function () {
   const gl = setupWebGL('main-canvas');
-  if (!gl) { console.error('[init] WebGL не ініціалізовано'); return; }
-  console.log('[init] WebGL OK, canvas:', gl.canvas.width, 'x', gl.canvas.height);
+  if (!gl) return;
+
+  console.log('[lab8] WebGL ok');
 
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  let progCol, progShadow;
-  try {
-    progCol    = createProgram(gl, VS_COL, FS_COL);
-    progShadow = createProgram(gl, VS,     FS);
-    console.log('[init] шейдери скомпільовано');
-  } catch(e) {
-    console.error('[init] помилка шейдерів:', e);
-    return;
-  }
+  const progScene  = createProgram(gl, VS_SCENE,  FS_SCENE);
+  const progShadow = createProgram(gl, VS_SHADOW, FS_SHADOW);
 
-  const groundBuf = uploadGeometry(gl, ground);
-  const buf1      = uploadGeometry(gl, box1.geo);
-  const buf2      = uploadGeometry(gl, box2.geo);
+  console.log('[lab8] programs compiled');
+
+  const sceneLocs = {
+    uMVP: gl.getUniformLocation(progScene,  'u_MVP'),
+    aPos: gl.getAttribLocation(progScene,   'a_Position'),
+    aCol: gl.getAttribLocation(progScene,   'a_Color'),
+  };
+  const shadowLocs = {
+    uMVP:   gl.getUniformLocation(progShadow, 'u_MVP'),
+    uAlpha: gl.getUniformLocation(progShadow, 'u_Alpha'),
+    aPos:   gl.getAttribLocation(progShadow,  'a_Position'),
+  };
+
+  console.log('[lab8] scene locs aPos=' + sceneLocs.aPos + ' aCol=' + sceneLocs.aCol);
+  console.log('[lab8] shadow locs aPos=' + shadowLocs.aPos);
+
+  const groundBuf = upload(gl, GROUND);
+  const box1Buf   = upload(gl, BOX1.mesh);
+  const box2Buf   = upload(gl, BOX2.mesh);
+
+  console.log('[lab8] buffers ok, box1 count=' + BOX1.mesh.count + ' box2 count=' + BOX2.mesh.count);
 
   const aspect = gl.canvas.width / gl.canvas.height;
   const P  = mat4.perspective(45, aspect, 0.1, 30);
   const V  = mat4.lookAt([0, 4.5, 6], [0, 0, 0], [0, 1, 0]);
   const PV = mat4.multiply(P, V);
-  console.log('[init] PV matrix:', Array.from(PV).map(x => x.toFixed(3)));
 
-  const groundMVP = mat4.multiply(PV, mat4.identity());
-  const GROUND_Y  = 0.001;
+  const M1 = mat4.trans(BOX1.x, BOX1.y, BOX1.z);
+  const M2 = mat4.trans(BOX2.x, BOX2.y, BOX2.z);
 
-  function getParams() {
-    return {
-      lightAngle:  parseFloat(document.getElementById('ctrl-light')?.value  ?? 0),
-      shadowAlpha: parseFloat(document.getElementById('ctrl-alpha')?.value  ?? 0.45),
-    };
+  // y=0.001 щоб уникнути z-fighting мiж тiнню i землею
+  const GROUND_Y = 0.001;
+
+  function getAlpha() {
+    return parseFloat(document.getElementById('ctrl-alpha')?.value ?? 0.5);
   }
 
-  let rotY = 0, last = null, frameCount = 0;
+  // плавна тiнь через кiлька шарiв з рiзною прозорiстю
+  function drawSoftShadow(gl, locs, buf, baseMVP, alpha) {
+    // малюємо 3 шари зi зменшеним alpha - iмiтує м'який край
+    const layers = [
+      { scale: 1.00, a: alpha },
+      { scale: 1.15, a: alpha * 0.35 },
+      { scale: 1.30, a: alpha * 0.12 },
+    ];
+    for (const layer of layers) {
+      const S = mat4.scale(layer.scale, 1.0, layer.scale);
+      const mvp = mat4.multiply(baseMVP, S);
+      drawShadow(gl, locs, buf, mvp, layer.a);
+    }
+  }
+
+  let lightAngle = 0, last = null, frames = 0;
 
   function render(ts) {
     const dt = last !== null ? (ts - last) * 0.001 : 0;
     last = ts;
-    rotY += dt * 0.3;
-    frameCount++;
+    frames++;
 
-    const p  = getParams();
-    const la = rotY * 0.6 + p.lightAngle;
-    const lx = 4.0 * Math.cos(la);
-    const ly = 5.0;
-    const lz = 4.0 * Math.sin(la);
+    const moving = document.getElementById('ctrl-move')?.checked ?? true;
+    if (moving) lightAngle += dt * 0.7;
 
-    if (frameCount <= 3) {
-      console.log(`[frame ${frameCount}] light=(${lx.toFixed(2)}, ${ly}, ${lz.toFixed(2)}) alpha=${p.shadowAlpha}`);
-    }
+    const lx = 4.0 * Math.cos(lightAngle);
+    const ly = 6.0;
+    const lz = 4.0 * Math.sin(lightAngle);
+    const alpha = getAlpha();
 
-    const SP = shadowProjectionFixed(lx, ly, lz, GROUND_Y);
-    const M1 = mat4.trans(box1.tx, box1.ty, box1.tz);
-    const M2 = mat4.trans(box2.tx, box2.ty, box2.tz);
-
-    if (frameCount === 1) {
-      console.log('[frame 1] M1:', Array.from(M1).map(x=>x.toFixed(2)));
-      const mvp1 = mat4.multiply(PV, M1);
-      console.log('[frame 1] MVP box1:', Array.from(mvp1).map(x=>x.toFixed(3)));
-    }
+    const SP   = mat4.shadowProjection(lx, ly, lz, GROUND_Y);
+    const sh1  = mat4.multiply(PV, mat4.multiply(SP, M1));
+    const sh2  = mat4.multiply(PV, mat4.multiply(SP, M2));
+    const mvp1 = mat4.multiply(PV, M1);
+    const mvp2 = mat4.multiply(PV, M2);
 
     gl.clearColor(0.165, 0.153, 0.145, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    gl.useProgram(progCol);
-    drawObject(gl, progCol, groundBuf, groundMVP);
+    // крок 1: малюємо землю i фiгури
+    gl.useProgram(progScene);
+    drawScene(gl, sceneLocs, groundBuf, PV);
+    drawScene(gl, sceneLocs, box1Buf,   mvp1);
+    drawScene(gl, sceneLocs, box2Buf,   mvp2);
 
-    gl.depthMask(false);
+    // крок 2: тiнi поверх землi
+    // depthMask(false) - завдання 3: depth test увiмкнено для перевiрки
+    // але запис вимкнено щоб тiнi не закривали однi одних
     gl.useProgram(progShadow);
-    const shadow1MVP = mat4.multiply(PV, mat4.multiply(SP, M1));
-    const shadow2MVP = mat4.multiply(PV, mat4.multiply(SP, M2));
-    drawShadow(gl, progShadow, buf1, shadow1MVP, p.shadowAlpha);
-    drawShadow(gl, progShadow, buf2, shadow2MVP, p.shadowAlpha);
+    gl.depthMask(false);
+    drawSoftShadow(gl, shadowLocs, box1Buf, sh1, alpha);
+    drawSoftShadow(gl, shadowLocs, box2Buf, sh2, alpha);
     gl.depthMask(true);
 
-    gl.useProgram(progCol);
-    drawObject(gl, progCol, buf1, mat4.multiply(PV, M1));
-    drawObject(gl, progCol, buf2, mat4.multiply(PV, M2));
+    if (frames === 1) {
+      console.log('[lab8] first frame ok, gl.getError()=' + gl.getError());
+    }
 
     const el = document.getElementById('status-info');
     if (el) {
       el.textContent =
         `light(${lx.toFixed(1)}, ${ly.toFixed(1)}, ${lz.toFixed(1)})` +
-        ` · shadow alpha: ${p.shadowAlpha.toFixed(2)}`;
+        `  alpha: ${alpha.toFixed(2)}  frame: ${frames}`;
     }
 
-    updateLightMarker(lx, ly, lz, P, V);
     requestAnimationFrame(render);
   }
 
   requestAnimationFrame(render);
 
-  [['ctrl-alpha', 'val-alpha', v => parseFloat(v).toFixed(2)]].forEach(([sid, did, fmt]) => {
-    const s = document.getElementById(sid);
-    const d = document.getElementById(did);
-    if (!s || !d) return;
-    d.textContent = fmt(s.value);
-    s.addEventListener('input', () => { d.textContent = fmt(s.value); });
-  });
+  const slider = document.getElementById('ctrl-alpha');
+  const label  = document.getElementById('val-alpha');
+  if (slider && label) {
+    label.textContent = parseFloat(slider.value).toFixed(2);
+    slider.addEventListener('input', () => {
+      label.textContent = parseFloat(slider.value).toFixed(2);
+    });
+  }
 };
-
-function updateLightMarker(lx, ly, lz, P, V) {
-  const ov = document.getElementById('light-overlay');
-  if (!ov) return;
-  const ctx = ov.getContext('2d');
-  ctx.clearRect(0, 0, ov.width, ov.height);
-
-  const PV   = multiplyJS(P, V);
-  const clip = transformPoint(PV, [lx, ly, lz]);
-  if (clip[3] <= 0) return;
-
-  const nx = (clip[0] / clip[3]) * 0.5 + 0.5;
-  const ny = 1 - ((clip[1] / clip[3]) * 0.5 + 0.5);
-  const px = nx * ov.width;
-  const py = ny * ov.height;
-
-  ctx.beginPath();
-  ctx.arc(px, py, 8, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 220, 100, 0.9)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  ctx.font = '11px DM Mono, monospace';
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.fillText('light', px + 12, py + 4);
-}
-
-function multiplyJS(a, b) {
-  const o = new Array(16).fill(0);
-  for (let r=0;r<4;r++)
-    for (let c=0;c<4;c++)
-      for (let k=0;k<4;k++) o[r+c*4] += a[r+k*4]*b[k+c*4];
-  return o;
-}
-
-function transformPoint(m, p) {
-  const [x,y,z] = p;
-  return [
-    m[0]*x+m[4]*y+m[8]*z+m[12],
-    m[1]*x+m[5]*y+m[9]*z+m[13],
-    m[2]*x+m[6]*y+m[10]*z+m[14],
-    m[3]*x+m[7]*y+m[11]*z+m[15],
-  ];
-}
