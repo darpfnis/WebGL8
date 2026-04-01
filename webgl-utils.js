@@ -84,14 +84,16 @@ export const mat4 = {
   },
 
   // матриця проекції тiнi на горизонтальну площину y=groundY
-  // lx,ly,lz -- позицiя джерела свiтла
+  // lx,ly,lz - позицiя джерела свiтла
+  // column-major: col0=[d,0,0,0], col1=[-lx,-g,-lz,-1], col2=[0,0,d,0], col3=[lx*g,g*ly,lz*g,ly]
+  // row1 (y): [0,-g,0,g*ly] -> y/w = g*ly / (ly-Py) ... * (1/1) => y_proj = groundY завжди
   shadowProjection(lx, ly, lz, groundY) {
-    const d = ly - groundY;
+    const d = ly - groundY, g = groundY;
     return new Float32Array([
-       d,    0,    0,   0,
-      -lx,   0,  -lz,  -1,
-       0,    0,    d,    0,
-       lx*groundY, 0, lz*groundY, ly,
+      d,    0,    0,   0,      // col 0
+     -lx,  -g,  -lz,  -1,     // col 1
+      0,    0,    d,   0,      // col 2
+      lx*g, g*ly, lz*g, ly,   // col 3
     ]);
   },
 };
